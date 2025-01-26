@@ -90,7 +90,9 @@ stock_basic_df = stock_basic_df[
 stock_basic_df["list_date"] = pd.to_datetime(
     stock_basic_df["list_date"], format="%Y%m%d"
 )
+stock_basic_df = stock_basic_df[stock_basic_df["name"].str.contains("ST") == False]
 stock_basic_df = stock_basic_df[stock_basic_df["list_date"] < "2024-06-30"]
+
 print(stock_basic_df.shape)
 
 

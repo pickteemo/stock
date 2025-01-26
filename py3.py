@@ -27,6 +27,31 @@ etf_df = pd.read_csv("./data/etf_basic_df.csv")
 basic_df = pd.read_csv("./data/basic_df.csv")
 
 
+def apply_ma(df):
+    df = df.sort_values(by="trade_date", ascending=True)
+
+    ma_values = {}
+    for i in range(2, 121):
+        ma_values[f"ma{i}"] = ta.MA(df["close"].values, timeperiod=i)
+
+    k_ma = 1.0
+    if ma_values["ma20"][-1] < ma_values["ma60"][-1]:
+        k_ma = k_ma * 0.8
+
+    if ma_values["ma60"][-1] < ma_values["ma120"][-1]:
+        k_ma = k_ma * 0.8
+
+    ma_df = pd.DataFrame(ma_values, index=df.index)
+    df = pd.concat([df, ma_df], axis=1)
+
+    close_value = df.iloc[-1]["close"]
+    ma_columns = [f"ma{i}" for i in range(2, 120)]  # 获取所有均线列名
+    greater_than_ma = [close_value > df[f"ma{i}"].iloc[-1] for i in range(2, 121)]
+    proportion = sum(greater_than_ma) / len(greater_than_ma)  # 计算比例
+
+    return df, proportion * k_ma
+
+
 # %%
 def apply_supertrend(df, period=10, multiplier=3):
     df = df.sort_values(by="trade_date", ascending=True)
@@ -228,8 +253,7 @@ if not os.path.exists(plt_work_dir):
     os.makedirs(os.path.join(plt_work_dir, "buy"))
     os.makedirs(os.path.join(plt_work_dir, "sell"))
 
-buy_list = []
-sell_list = []
+up_df = pd.DataFrame()
 up_list = []
 industry_list = []
 industry_df = pd.DataFrame()
@@ -239,41 +263,45 @@ for f in pbar:
     file_path = os.path.join(daily_data_dir, f)
     df = pd.read_csv(file_path)
     df = df.dropna(subset=["open", "high", "low", "close"])
-
+    if df.empty:
+        print(f"Empty file: {f}")
+        continue
     ts_code = df["ts_code"].iloc[0]
     name = str(ts_code)
     if ts_code in basic_df["ts_code"].values:
         name = basic_df.loc[basic_df["ts_code"] == ts_code, "name"].values[0]
 
-    # supertrend
-    supertrend_df = apply_supertrend(df)
-    if pd.notna(supertrend_df["buy-signal"].iloc[-1]):
-        # plot_supertrend(supertrend_df, os.path.join(plt_work_dir, "buy", f+name+".png"))
-        # supertrend_df.to_csv(os.path.join(plt_work_dir, "buy", f+name+".csv"), index=False)
-        buy_list.append(ts_code)
-    if pd.notna(supertrend_df["sell-signal"].iloc[-1]):
-        # plot_supertrend(supertrend_df, os.path.join(plt_work_dir, "sell", f+name+".png"))
-        # supertrend_df.to_csv(os.path.join(plt_work_dir, "sell", f+name+".csv"), index=False)
-        sell_list.append(ts_code)
-    if supertrend_df.iloc[-1]["close"] > supertrend_df.iloc[-1]["st"]:
-        up_list.append(ts_code)
+    # ma
+    df, proportion = apply_ma(df)
 
-    # left strategy
+    new_row = pd.DataFrame(
+        {"ts_code": ts_code, "name": name, "proportion": proportion}, index=[0]
+    )
+
+    up_df = pd.concat([up_df, new_row])
+
+    # supertrend
+    # supertrend_df = apply_supertrend(df)
+    # if supertrend_df["buy-signal"].tail(5).notna().any():
+    #     # plot_supertrend(supertrend_df, os.path.join(plt_work_dir, "buy", f+name+".png"))
+    #     # supertrend_df.to_csv(os.path.join(plt_work_dir, "buy", f+name+".csv"), index=False)
+    #     buy_list.append(ts_code)
+    # if pd.notna(supertrend_df["sell-signal"].iloc[-1]):
+    #     # plot_supertrend(supertrend_df, os.path.join(plt_work_dir, "sell", f+name+".png"))
+    #     # supertrend_df.to_csv(os.path.join(plt_work_dir, "sell", f+name+".csv"), index=False)
+    #     sell_list.append(ts_code)
+    # if supertrend_df.iloc[-1]["close"] > supertrend_df.iloc[-1]["st"]:
+    #     up_list.append(ts_code)
+
     stock_code = list(stock_basic_df["ts_code"])
     if ts_code in stock_code:
         # calculate insdustry
         ind_df = get_industry_info(df)
+        ind_df["proportion"] = proportion
         industry_list.append(ind_df)
 
-print("len up:", len(up_list))
+print("len up:", up_df[up_df["proportion"] > 0.5].shape[0])
 industry_df = pd.concat(industry_list)
 industry_df.to_csv(os.path.join("data", "industry.csv"), index=False)
-pd.DataFrame(buy_list, columns=["Column1"]).to_csv(
-    os.path.join("data", "buy_list.csv"), index=False
-)
-pd.DataFrame(sell_list, columns=["Column1"]).to_csv(
-    os.path.join("data", "sell_list.csv"), index=False
-)
-pd.DataFrame(up_list, columns=["Column1"]).to_csv(
-    os.path.join("data", "up_list.csv"), index=False
-)
+
+up_df.to_csv(os.path.join("data", "up_df.csv"), index=False)
